@@ -1,110 +1,172 @@
 import torch
 import torch.nn as nn
-import torch.optim as optimizer
+import torch.optim as optim
 import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
-
-from model import Generator, Discriminator
+import os
 from tqdm import tqdm
 
-
-transform = transforms.Compose([
-                                transforms.Resize((128, 128)), 
-                                transforms.ToTensor(), 
-                                transforms.Normalize(mean=[0, 0, 0], std=[1, 1, 1])])
-
-data_dir = "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/animals-20240921T054754Z-001/animals"
-data_set = datasets.ImageFolder(root=data_dir, transform=transform)
-batch_size = 64
-data_loader = DataLoader(data_set, batch_size=batch_size, shuffle=True, num_workers=4)
+from model import Generator, Discriminator
 
 
-desired_device_index = 6
-torch.cuda.set_device(desired_device_index)
+
+def initialize_weights(model):
+    for m in model.modules():
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):
+            nn.init.normal_(m.weight.data, 0.0, 0.02)
+
+# Configuration
+DATA_DIR = "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/animals-20240921T054754Z-001/animals"
+RESULTS_DIR = "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results"
+CHECKPOINT_DIR = os.path.join(RESULTS_DIR, "checkpoints")
+TENSORBOARD_DIR = os.path.join(RESULTS_DIR, "tensorboard")
+
+BATCH_SIZE = 64
+LEARNING_RATE = 2e-4
+NUM_EPOCHS = 500
+DESIRED_DEVICE_INDEX = 2
+Z_DIM = 128
+FEATURES_G = 64
+FEATURES_D = 64
+img_channel = 3
+
+# Ensure directories exist
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(TENSORBOARD_DIR, exist_ok=True)
+
+# Set up device
+
+torch.cuda.set_device(DESIRED_DEVICE_INDEX)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-gen = Generator(100, 64).to(device)
-disc = Discriminator(64).to(device) 
+print(f"Using device: {device}")
 
-fixed_noise = torch.randn(32, 100, 1, 1).to(device)
+# Data loading and preprocessing
+transform = transforms.Compose([
+    transforms.Resize((128, 128)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+])
 
-learning_rate = 2e-4
-optim_gen = optimizer.Adam(gen.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-optim_disc = optimizer.Adam(disc.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-num_epochs = 100
-criterian = nn.BCELoss()
+
+dataset = datasets.ImageFolder(root=DATA_DIR, transform=transform)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+
+
+# Initialize models
+gen = Generator(img_channel, Z_DIM, FEATURES_G).to(device)
+disc = Discriminator(img_channel, FEATURES_D).to(device)
+
+#initialize parameters
+initialize_weights(gen)
+initialize_weights(disc)
+
+# Optimizers
+optim_gen = optim.Adam(gen.parameters(), lr=LEARNING_RATE, betas=(0.5, 0.999))
+optim_disc = optim.Adam(disc.parameters(), lr=LEARNING_RATE, betas=(0.5, 0.999))
+
+# Learning rate scheduler
+scheduler_g = optim.lr_scheduler.ExponentialLR(optim_gen, gamma=0.99)
+scheduler_d = optim.lr_scheduler.ExponentialLR(optim_disc, gamma=0.99)
+
+# Loss function
+criterion = nn.BCELoss()
+
+# Fixed noise for visualization
+fixed_noise = torch.randn(32, Z_DIM, 1, 1).to(device)
+
+# TensorBoard writers
+writer_real = SummaryWriter(os.path.join(TENSORBOARD_DIR, "real"))
+writer_fake = SummaryWriter(os.path.join(TENSORBOARD_DIR, "fake"))
+writer_loss = SummaryWriter(os.path.join(TENSORBOARD_DIR, "loss"))
 
 gen.train()
 disc.train()
-step1 = 0
-step2 = 0
+step = 0
 
-writer_real = SummaryWriter(f"/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/tensorboard")
-writer_fake = SummaryWriter(f"/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/tensorboard")
-writer_loss_plot = SummaryWriter(f"/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/tensorboard")
+for epoch in range(NUM_EPOCHS):
 
-gen_loss_vector = []
-disc_loss_vector = []
-
-
-for epoch in range(num_epochs):
-    with tqdm(total=len(data_loader), desc=f'Epoch {epoch + 1}/{num_epochs}', unit='batch') as pbar:
-        for batch_idx, (real, _) in enumerate(data_loader):
-            real = real.to(device)
-            noise = torch.randn(batch_size, 100, 1, 1).to(device)
-            fake = gen(noise)
-
-            pred_real = disc(real).reshape(-1)
-            loss_real = criterian(pred_real, torch.ones_like(pred_real))
-            pred_fake = disc(fake.detach()).reshape(-1)
-            loss_fake = criterian(pred_fake, torch.zeros_like(pred_fake))
-            loss_disc = (loss_fake+loss_real)/2
-            optim_disc.zero_grad()
-            loss_disc.backward()
-            disc_loss_vector.append(loss_disc.detach().cpu().numpy().item())
-            optim_disc.step()
-
-            writer_loss_plot.add_scalar("Discriminator loss", loss_disc, global_step=step2)
-
-            output = disc(fake).reshape(-1)
-            loss_gen = criterian(output, torch.ones_like(output))
-            optim_gen.zero_grad()
-            loss_gen.backward()
-            gen_loss_vector.append(loss_gen.detach().cpu().numpy().item())
-            optim_gen.step()
-            writer_loss_plot.add_scalar(f"Generator loss", loss_gen, global_step=step2)
-
-            step2 += 1
-            pbar.update(1)
-
+    total_loss_gen = 0
+    total_loss_disc = 0
+    batch_step = 0
+    pbar = tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Epoch {epoch+1}/{NUM_EPOCHS}")
+    for batch_idx, (real, _) in pbar:
         
-            if batch_idx % 50 == 0:
-                with torch.no_grad():
-                    fake = gen(fixed_noise)
-                    img_grid_real = torchvision.utils.make_grid(real[:32], normalize=True)
-                    img_grid_fake = torchvision.utils.make_grid(fake[:32], normalize=True)
-
-                    writer_real.add_image("Real", img_grid_real, global_step=step1)
-                    writer_fake.add_image("Fake", img_grid_fake, global_step=step1)
-
-                    step1 += 1
-
+        real = real.to(device)
+        current_batch_size = real.size(0)
         
-checkpoints_disc = {"Discriminator state dict": disc.state_dict()}
-checkpoints_gen = {"Generator state dict": gen.state_dict()}
+        # Train Discriminator
+        noise = torch.randn(current_batch_size, Z_DIM, 1, 1).to(device)
+        fake = gen(noise)
+        
+        disc_real = disc(real).reshape(-1)
+        loss_disc_real = criterion(disc_real, torch.ones_like(disc_real))
+        disc_fake = disc(fake.detach()).reshape(-1)
+        loss_disc_fake = criterion(disc_fake, torch.zeros_like(disc_fake))
+        loss_disc = (loss_disc_real + loss_disc_fake) / 2
+        disc.zero_grad()
+        loss_disc.backward()
+        torch.nn.utils.clip_grad_norm_(disc.parameters(), max_norm=1.0)
+        optim_disc.step()
+        
+        # Train Generator
+        output = disc(fake).reshape(-1)
+        loss_gen = criterion(output, torch.ones_like(output))
+        gen.zero_grad()
+        loss_gen.backward()
+        torch.nn.utils.clip_grad_norm_(gen.parameters(), max_norm=1.0)
+        optim_gen.step()
+        
+        total_loss_gen += loss_gen.item()
+        total_loss_disc += loss_disc.item()
+        
+        # Update TensorBoard
+        if batch_idx % 10 == 0:
+            writer_loss.add_scalar("Discriminator Loss Batch", loss_disc.item(), global_step=batch_step)
+            writer_loss.add_scalar("Generator Loss Batch", loss_gen.item(), global_step=batch_step)
+            batch_step += 1
+        
+        pbar.set_postfix({"D Loss": loss_disc.item(), "G Loss": loss_gen.item()})
+    
+    with torch.no_grad():
+        fake = gen(fixed_noise)
+        img_grid_real = torchvision.utils.make_grid(real[:32], normalize=True)
+        img_grid_fake = torchvision.utils.make_grid(fake[:32], normalize=True)
+        writer_real.add_image("Real", img_grid_real, global_step=step)
+        writer_fake.add_image("Fake", img_grid_fake, global_step=step)
+
+        #get average loss of generator and critic for each epoch
+        avg_loss_gen = total_loss_gen / len(dataloader)
+        avg_loss_disc= total_loss_disc / len(dataloader)
+        #write loss to tensorboard
+        writer_loss.add_scalar("Generator loss Epoch", avg_loss_gen, global_step=step)
+        writer_loss.add_scalar("Discriminator loss Epoch", avg_loss_disc, global_step=step)
+
+    step += 1
+
+    # Update learning rates
+    scheduler_g.step()
+    scheduler_d.step()
+    
+    # Save checkpoints
+    torch.save({
+        "generator": gen.state_dict(),
+        "discriminator": disc.state_dict(),
+        "optim_gen": optim_gen.state_dict(),
+        "optim_disc": optim_disc.state_dict(),
+    }, os.path.join(CHECKPOINT_DIR, f"checkpoint_epoch_{epoch+1}.pth"))
+
+# Save final model and losses
+torch.save(gen.state_dict(), os.path.join(CHECKPOINT_DIR, "generator_final.pth"))
+torch.save(disc.state_dict(), os.path.join(CHECKPOINT_DIR, "discriminator_final.pth"))
 
 
-torch.save(checkpoints_disc, "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/checkpoints")
-torch.save(checkpoints_gen, "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/checkpoints")
-np.save("/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/gen_loss.npy", gen_loss_vector)
-np.save("/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results/disc_loss.npy", disc_loss_vector)
+writer_real.close()
+writer_fake.close()
+writer_loss.close()
 
-
-
-
-
-
+print("Training completed.")  
