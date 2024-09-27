@@ -65,6 +65,7 @@ decoder = Decoder().to(device)
 #initialize parameters
 initialize_weights(gen)
 initialize_weights(disc)
+initialize_weights(decoder)
 
 # Optimizers
 optim_gen = optim.Adam(gen.parameters(), lr=LEARNING_RATE, betas=(0.5, 0.999))
