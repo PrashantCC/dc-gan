@@ -37,6 +37,7 @@ class Discriminator(nn.Module):
         )
     
     def forward(self, x):
+        x = x.view(x.shape[0], -1, 1 , 1)
         return self.disc(x)
     
 class Generator(nn.Module):
