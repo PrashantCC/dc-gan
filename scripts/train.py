@@ -149,7 +149,7 @@ for epoch in range(NUM_EPOCHS):
             writer_loss.add_scalar("Generator_Decoder Loss Batch", loss_gen_dec.item(), global_step=batch_step)
             batch_step += 1
         
-        pbar.set_postfix({"D Loss": loss_disc.item(), "G Loss": loss_gen_dec.item()})
+        pbar.set_postfix({"Disc Loss": loss_disc.item(), "Gen_dec Loss": loss_gen_dec.item(), "G Loss": loss_gen.item(), "dec Loss": loss_dec.item()})
     
     with torch.no_grad():
         fake = gen(fixed_noise)
