@@ -90,3 +90,24 @@ class Decoder(nn.Module):
         x = F.relu(self.fc1(x))  # Fully connected layer
         x = self.fc2(x)  # Output layer
         return x
+    
+
+class Classifier(nn.Module):
+    def __init__(self, input_size=128, hidden_sizes=[256, 128, 64], output_size=90, dropout_rate=0.5):
+        super(Classifier, self).__init__()
+        self.hidden_layers = nn.ModuleList()
+        self.dropout_layers = nn.ModuleList()
+
+        # Create hidden layers
+        for i, hidden_size in enumerate(hidden_sizes):
+            self.hidden_layers.append(nn.Linear(input_size if i == 0 else hidden_sizes[i-1], hidden_size))
+            self.dropout_layers.append(nn.Dropout(dropout_rate))
+
+        self.output_layer = nn.Linear(hidden_sizes[-1], output_size)
+
+    def forward(self, x):
+        for layer, dropout in zip(self.hidden_layers, self.dropout_layers):
+            x = F.relu(layer(x))
+            x = dropout(x)  # Apply dropout
+        x = self.output_layer(x)
+        return F.log_softmax(x, dim=1)
