@@ -93,7 +93,7 @@ gen.train()
 disc.train()
 step = 0
 
-start_epoch = s
+start_epoch = 73
 CHECKPOINT_PATH = f"/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results_decoder/checkpoints/checkpoint_epoch_{start_epoch}.pth"
 
 if os.path.exists(CHECKPOINT_PATH):
