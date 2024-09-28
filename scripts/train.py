@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
 import os
 from tqdm import tqdm
@@ -38,7 +38,14 @@ transform = transforms.Compose([
 ])
 
 dataset = datasets.ImageFolder(root=DATA_DIR, transform=transform)
-dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+
+# Split the dataset
+train_size = int(0.8 * len(dataset))
+test_size = len(dataset) - train_size
+train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
 # Initialize models
 decoder = Decoder().to(device)
@@ -53,71 +60,93 @@ scheduler_classi = optim.lr_scheduler.ExponentialLR(optim_classi, gamma=0.99)
 # Loss function
 criterion = nn.CrossEntropyLoss()
 
-# TensorBoard writers
-writer_loss_accuracy = SummaryWriter(os.path.join(TENSORBOARD_DIR, "loss_accuracy"))
+# TensorBoard writer
+writer = SummaryWriter(TENSORBOARD_DIR)
 
 # Load pre-trained decoder
-decoder_checkpoint_path = os.path.join(CHECKPOINT_DIR, "decoder_final.pth")
+
+decoder_checkpoint_path = "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results_decoder/checkpoints/decoder_final.pth"
 decoder.load_state_dict(torch.load(decoder_checkpoint_path))
 decoder.eval()
 
-classifier.train()
-
-# Main training loop with progress bar
-for epoch in tqdm(range(NUM_EPOCHS), desc="Epochs"):
+# Training function
+def train_epoch(model, loader, optimizer, criterion, device):
+    model.train()
     running_loss = 0.0
     correct_preds = 0
     total_preds = 0
-
-    # Inner loop with progress bar
-    progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}", leave=False)
+    
+    progress_bar = tqdm(loader, desc="Training", leave=False)
     for inputs, labels in progress_bar:
-        inputs = inputs.to(device)
-        labels = labels.to(device)
+        inputs, labels = inputs.to(device), labels.to(device)
         
-        optim_classi.zero_grad()
-
-        # Forward pass
+        optimizer.zero_grad()
+        
         with torch.no_grad():
             decoded_inputs = decoder(inputs)
-        outputs = classifier(decoded_inputs)
+        outputs = model(decoded_inputs)
         loss = criterion(outputs, labels)
-
-        # Backward pass and optimization
+        
         loss.backward()
-        optim_classi.step()
-
-        # Update loss
+        optimizer.step()
+        
         running_loss += loss.item()
-
-        # Calculate accuracy
         _, predicted = torch.max(outputs, 1)
         correct_preds += (predicted == labels).sum().item()
         total_preds += labels.size(0)
+        
+        progress_bar.set_postfix({'loss': f"{loss.item():.4f}", 'accuracy': f"{correct_preds/total_preds:.4f}"})
+    
+    return running_loss / len(loader), correct_preds / total_preds
 
-        # Update progress bar
-        progress_bar.set_postfix({
-            'loss': f"{loss.item():.4f}",
-            'accuracy': f"{correct_preds/total_preds:.4f}"
-        })
+# Testing function
+def test(model, loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct_preds = 0
+    total_preds = 0
+    
+    with torch.no_grad():
+        for inputs, labels in loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            decoded_inputs = decoder(inputs)
+            outputs = model(decoded_inputs)
+            loss = criterion(outputs, labels)
+            
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            correct_preds += (predicted == labels).sum().item()
+            total_preds += labels.size(0)
+    
+    return running_loss / len(loader), correct_preds / total_preds
 
-    # Average loss and accuracy for the epoch
-    epoch_loss = running_loss / len(dataloader)
-    epoch_accuracy = correct_preds / total_preds
-
+# Main training loop
+for epoch in tqdm(range(NUM_EPOCHS), desc="Epochs"):
+    train_loss, train_acc = train_epoch(classifier, train_loader, optim_classi, criterion, device)
+    test_loss, test_acc = test(classifier, test_loader, criterion, device)
+    
     # Logging to TensorBoard
-    writer_loss_accuracy.add_scalar('Loss/train', epoch_loss, epoch)
-    writer_loss_accuracy.add_scalar('Accuracy/train', epoch_accuracy, epoch)
-
+    writer.add_scalar('Loss/Train', train_loss, epoch)
+    writer.add_scalar('Loss/Test', test_loss, epoch)
+    writer.add_scalar('Accuracy/Train', train_acc, epoch)
+    writer.add_scalar('Accuracy/Test', test_acc, epoch)
+    
+    # Log learning rate
+    writer.add_scalar('Learning Rate', scheduler_classi.get_last_lr()[0], epoch)
+    
     # Print progress
-    tqdm.write(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Loss: {epoch_loss:.4f}, Accuracy: {epoch_accuracy:.4f}")
-
+    tqdm.write(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
+    
     # Step the scheduler
     scheduler_classi.step()
 
 # Close the writer
-writer_loss_accuracy.close()
+writer.close()
 
 # Save the final model
 torch.save(classifier.state_dict(), os.path.join(CHECKPOINT_DIR, "classifier_final.pth"))
 print("Training completed. Model saved.")
+print(f"TensorBoard logs saved to {TENSORBOARD_DIR}")
+print("To view the TensorBoard, run:")
+print(f"tensorboard --logdir={TENSORBOARD_DIR}")
