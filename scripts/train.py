@@ -27,7 +27,7 @@ TENSORBOARD_DIR = os.path.join(RESULTS_DIR, "tensorboard")
 
 BATCH_SIZE = 64
 LEARNING_RATE = 2e-4
-NUM_EPOCHS = 100
+NUM_EPOCHS = 200
 DESIRED_DEVICE_INDEX = 2
 Z_DIM = 128
 FEATURES_G = 64
@@ -93,7 +93,27 @@ gen.train()
 disc.train()
 step = 0
 
-for epoch in range(NUM_EPOCHS):
+
+CHECKPOINT_PATH = "/data6/shubham/PC/course_assignments/ADRL/Assignment-1/DC_GAN/results_decoder/checkpoints/checkpoint_epoch_73.pth"
+
+if os.path.exists(CHECKPOINT_PATH):
+    print(f"Loading checkpoint from {CHECKPOINT_PATH}...")
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
+
+    gen.load_state_dict(checkpoint["generator"])
+    disc.load_state_dict(checkpoint["discriminator"])
+    decoder.load_state_dict(checkpoint["decoder"])
+    optim_gen.load_state_dict(checkpoint["optim_gen"])
+    optim_disc.load_state_dict(checkpoint["optim_disc"])
+    optim_decoder.load_state_dict(checkpoint["opt_decoder"])
+
+    # Set the start epoch for resuming training
+    start_epoch = 0  # Start from the next epoch after 73
+else:
+    print("Checkpoint not found. Starting training from scratch.")
+    start_epoch = 1
+
+for epoch in range(74, NUM_EPOCHS+1):
 
     total_loss_gen = 0
     total_loss_dec = 0
@@ -149,7 +169,7 @@ for epoch in range(NUM_EPOCHS):
             writer_loss.add_scalar("Generator_Decoder Loss Batch", loss_gen_dec.item(), global_step=batch_step)
             batch_step += 1
         
-        pbar.set_postfix({"Disc Loss": loss_disc.item(), "Gen_dec Loss": loss_gen_dec.item(), "G Loss": loss_gen.item(), "dec Loss": loss_dec.item()})
+        pbar.set_postfix({"Disc_Loss": loss_disc.item(), "Gen_dec_Loss": loss_gen_dec.item(), "G_Loss": loss_gen.item(), "dec_Loss": loss_dec.item()})
     
     with torch.no_grad():
         fake = gen(fixed_noise)
