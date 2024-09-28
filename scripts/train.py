@@ -28,7 +28,7 @@ TENSORBOARD_DIR = os.path.join(RESULTS_DIR, "tensorboard")
 BATCH_SIZE = 64
 LEARNING_RATE = 2e-4
 NUM_EPOCHS = 200
-DESIRED_DEVICE_INDEX = 2
+DESIRED_DEVICE_INDEX = 0
 Z_DIM = 128
 FEATURES_G = 64
 FEATURES_D = 64
@@ -113,7 +113,7 @@ else:
     print("Checkpoint not found. Starting training from scratch.")
     start_epoch = 1
 
-for epoch in range(74, NUM_EPOCHS+1):
+for epoch in range(start_epoch, NUM_EPOCHS+1):
 
     total_loss_gen = 0
     total_loss_dec = 0
